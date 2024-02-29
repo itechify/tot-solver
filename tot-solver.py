@@ -3,6 +3,7 @@ from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.core.window import Window
 from kivy.uix.label import Label
+from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
 from plyer import filechooser
 import threading
@@ -44,12 +45,27 @@ def follow(logfile_path, app):
         file.seek(0, 2)
         card_offerings = []
         card_stats = {}
+        tag_changes = []
 
         while True:
             line = file.readline()
             if not line:
                 time.sleep(0.1)
                 continue
+
+            # Capture tag changes
+            tag_change_match = re.search(r"name=([^\]]+).*?tag=(\S+) value=(\S+)", line)
+            if tag_change_match:
+                name, tag, value = tag_change_match.groups()
+                tag_change_str = f"{name} | {tag} ({value})"
+
+                # Update the list of last 20 tag changes
+                if len(tag_changes) >= 20:
+                    tag_changes.pop(0)
+                tag_changes.append(tag_change_str)
+
+                # Use Clock to schedule the UI update on the main thread
+                Clock.schedule_once(lambda dt: app.update_tag_changes(tag_changes), 0)
 
             # Extract stat changes
             stat_change_match = re.search(
@@ -112,6 +128,30 @@ class CardOfferingsLayout(BoxLayout):
         self.card2_label = Label(text="Waiting for card offering 2...", markup=True)
         self.add_widget(self.card1_label)
         self.add_widget(self.card2_label)
+
+        # Container for tag changes
+        self.tag_changes_label = Label(
+            size_hint_y=None, markup=True, halign="center", valign="middle"
+        )
+        self.tag_changes_label.bind(
+            width=lambda *x: self.tag_changes_label.setter("text_size")(
+                self.tag_changes_label, (self.tag_changes_label.width, None)
+            ),
+            texture_size=lambda *x: self.tag_changes_label.setter("height")(
+                self.tag_changes_label, self.tag_changes_label.texture_size[1]
+            ),
+        )
+        # Ensure the label's text is centered by updating its size_hint to allow for dynamic resizing
+        self.tag_changes_label.text_size = (self.tag_changes_label.width, None)
+
+        self.tag_changes_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        self.tag_changes_scroll.add_widget(self.tag_changes_label)
+        self.add_widget(self.tag_changes_scroll)
+        self.tag_changes_scroll.scroll_y = 0
+
+    def update_tag_changes(self, tag_changes):
+        # Format and display the last 20 tag changes
+        self.tag_changes_label.text = "\n".join(tag_changes)
 
     # Inside CardOfferingsLayout class
     def update_card_offerings(self, offerings):
@@ -185,6 +225,8 @@ class CardOfferingsApp(App):
         self.title = "ToT Solver by Egbert"
         self.layout = CardOfferingsLayout()
 
+        Window.size = (400, 300)
+
         # Open file picker popup on start
         Clock.schedule_once(lambda dt: self.open_file_picker())
 
@@ -214,6 +256,9 @@ class CardOfferingsApp(App):
 
     def update_card_offerings(self, offerings):
         self.layout.update_card_offerings(offerings)
+
+    def update_tag_changes(self, tag_changes):
+        self.layout.update_tag_changes(tag_changes)
 
 
 # Main execution
